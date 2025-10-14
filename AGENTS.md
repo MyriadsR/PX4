@@ -37,5 +37,4 @@
 - Clone with submodules: `git submodule update --init --recursive`.
 - Ninja is supported and preferred when available; Python is required for many tools (set `PYTHON_EXECUTABLE` if needed).
 
-// Agent-specific Guidelines
 
