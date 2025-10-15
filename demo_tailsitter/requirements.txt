@@ -1,0 +1,9 @@
+# Python依赖包
+# Tailsitter VTOL任务所需的Python库
+
+# MAVSDK - 与PX4通信的主要库
+mavsdk>=1.4.0
+
+# 可选：数据分析和可视化
+# numpy>=1.21.0
+# matplotlib>=3.5.0
