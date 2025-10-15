@@ -64,7 +64,7 @@ void Tailsitter::update_vtol_state()
 	 * For the backtransition the pitch is controlled in MC mode again and switches to full MC control reaching the sufficient pitch angle.
 	*/
 
-
+	// 当检测到固定翼系统故障时，立即切换到多旋翼(MC)模式以确保安全
 	if (_vtol_vehicle_status->fixed_wing_system_failure) {
 		// Failsafe event, switch to MC mode immediately
 		if (_vtol_mode != vtol_mode::MC_MODE) {

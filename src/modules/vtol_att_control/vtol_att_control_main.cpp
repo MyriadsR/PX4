@@ -46,6 +46,17 @@
  * @author Andreas Antener 	<andreas@uaventure.com>
  *
  */
+
+/*
+VTOL姿态控制器的工作原理可以总结为：
+
+- 初始化：根据参数创建特定类型的VTOL控制器（尾座式、倾转旋翼或标准VTOL）
+- 状态监控：持续监控飞行器状态、动作请求和命令
+- 模式管理：根据当前飞行模式（多旋翼、固定翼或过渡）调用相应的控制逻辑
+- 控制输出：计算并发布推力和扭矩设定点，以及襟翼和扰流板控制
+- 安全机制：实现quad-chute安全机制，在危险情况下紧急切换到多旋翼模式
+这个模块是PX4 VTOL支持的核心，它协调多旋翼和固定翼两种控制模式，确保VTOL飞行器在不同飞行阶段都能获得适当的姿态控制。*/
+
 #include "vtol_att_control_main.h"
 #include <px4_platform_common/events.h>
 #include <systemlib/mavlink_log.h>
@@ -60,6 +71,7 @@ VtolAttitudeControl::VtolAttitudeControl() :
 	_loop_perf(perf_alloc(PC_ELAPSED, "vtol_att_control: cycle"))
 {
 	// start vtol in rotary wing mode
+	// 将VTOL飞行器初始状态设置为多旋翼模式
 	_vtol_vehicle_status.vehicle_vtol_state = vtol_vehicle_status_s::VEHICLE_VTOL_STATE_MC;
 
 	parameters_update();
@@ -98,6 +110,7 @@ VtolAttitudeControl::init()
 	return true;
 }
 
+// 轮询飞行器状态
 void VtolAttitudeControl::vehicle_status_poll()
 {
 	_vehicle_status_sub.copy(&_vehicle_status);
@@ -111,6 +124,10 @@ void VtolAttitudeControl::vehicle_status_poll()
 	_nav_state_prev = _vehicle_status.nav_state;
 }
 
+/*
+处理动作请求，主要是VTOL模式转换请求，包括：
+- 转换到多旋翼模式
+- 转换到固定翼模式（同时重置固定翼系统故障标志）*/
 void VtolAttitudeControl::action_request_poll()
 {
 	while (_action_request_sub.updated()) {
@@ -138,6 +155,7 @@ void VtolAttitudeControl::action_request_poll()
 	}
 }
 
+// 处理飞行器命令，特别是VTOL转换命令
 void VtolAttitudeControl::vehicle_cmd_poll()
 {
 	vehicle_command_s vehicle_command;
@@ -183,6 +201,15 @@ void VtolAttitudeControl::vehicle_cmd_poll()
 	}
 }
 
+/*
+"Quad-chute"是一种安全机制，当检测到危险情况时，VTOL飞行器会紧急切换到多旋翼模式。触发原因包括：
+- 过渡超时
+- 外部命令
+- 低于最小高度
+- 非指令下降
+- 过渡期间高度损失
+- 超过最大俯仰角
+- 超过最大滚转角*/
 void
 VtolAttitudeControl::quadchute(QuadchuteReason reason)
 {
@@ -235,6 +262,8 @@ VtolAttitudeControl::quadchute(QuadchuteReason reason)
 	}
 }
 
+// 检查并更新参数。
+// 当检测到参数更新时，会从存储中加载新参数并更新VTOL类型特定的参数。
 void
 VtolAttitudeControl::parameters_update()
 {
@@ -253,6 +282,10 @@ VtolAttitudeControl::parameters_update()
 	}
 }
 
+/*
+根据当前VTOL模式更新回调函数注册。
+在过渡和多旋翼模式下，只监听多旋翼虚拟控制设定点；
+在固定翼模式下，只监听固定翼虚拟控制设定点。*/
 void
 VtolAttitudeControl::update_callbacks()
 {
@@ -279,6 +312,7 @@ VtolAttitudeControl::update_callbacks()
 	_previous_vtol_mode = current_vtol_mode;
 }
 
+// 整个模块的核心方法，实现了主要的控制循环
 void
 VtolAttitudeControl::Run()
 {
@@ -314,6 +348,7 @@ VtolAttitudeControl::Run()
 
 	perf_begin(_loop_perf);
 
+	// 更新输入：更新固定翼和多旋翼的虚拟控制设定点
 	bool updated_fw_in = _vehicle_torque_setpoint_virtual_fw_sub.update(&_vehicle_torque_setpoint_virtual_fw);
 	updated_fw_in |= _vehicle_thrust_setpoint_virtual_fw_sub.update(&_vehicle_thrust_setpoint_virtual_fw);
 	bool updated_mc_in = _vehicle_torque_setpoint_virtual_mc_sub.update(&_vehicle_torque_setpoint_virtual_mc);
@@ -327,6 +362,7 @@ VtolAttitudeControl::Run()
 		update_callbacks();
 	}
 
+	// 模式检查：根据当前VTOL模式决定是否运行控制逻辑
 	switch (current_vtol_mode) {
 	case mode::TRANSITION_TO_FW:
 	case mode::TRANSITION_TO_MC:
@@ -342,6 +378,7 @@ VtolAttitudeControl::Run()
 		break;
 	}
 
+	// 更新状态
 	if (should_run) {
 		parameters_update();
 
@@ -449,12 +486,14 @@ VtolAttitudeControl::Run()
 
 		_vtol_type->fill_actuator_outputs();
 
+		// 输出控制：发布推力和扭矩设定点
 		_vehicle_thrust_setpoint0_pub.publish(_thrust_setpoint_0);
 		_vehicle_thrust_setpoint1_pub.publish(_thrust_setpoint_1);
 		_vehicle_torque_setpoint0_pub.publish(_torque_setpoint_0);
 		_vehicle_torque_setpoint1_pub.publish(_torque_setpoint_1);
 
 		// Advertise/publish vtol vehicle status -- immediately if changed, otherwise at 1 Hz
+		// 状态发布：发布VTOL飞行器状态（变化时立即发布，否则每秒发布一次）
 		const bool vtol_vehicle_status_changed =
 			(_vtol_vehicle_status.vehicle_vtol_state != _prev_published_vtol_vehicle_status.vehicle_vtol_state) ||
 			(_vtol_vehicle_status.fixed_wing_system_failure != _prev_published_vtol_vehicle_status.fixed_wing_system_failure);
@@ -467,6 +506,7 @@ VtolAttitudeControl::Run()
 
 		// Publish flaps/spoiler setpoint with configured deflection in Hover if in Auto.
 		// In Manual always published in FW rate controller, and in Auto FW in FW Position Controller.
+		// 襟翼和扰流板控制：在自动模式下发布襟翼和扰流板设定点
 		if (_vehicle_control_mode.flag_control_auto_enabled
 		    && _vtol_vehicle_status.vehicle_vtol_state != vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
 
@@ -494,6 +534,7 @@ VtolAttitudeControl::Run()
 	perf_end(_loop_perf);
 }
 
+// 创建VTOL姿态控制任务的实例
 int
 VtolAttitudeControl::task_spawn(int argc, char *argv[])
 {
