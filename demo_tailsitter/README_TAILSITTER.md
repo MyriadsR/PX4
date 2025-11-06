@@ -61,7 +61,7 @@ make px4_sitl gz_quadtailsitter
 在终端2中：
 ```bash
 cd /home/zr/PX4_ws/PX4_project
-python3 tailsitter_waypoint_mission.py
+python3 tailsitter_offboard_control.py
 ```
 
 ## 📊 任务流程说明

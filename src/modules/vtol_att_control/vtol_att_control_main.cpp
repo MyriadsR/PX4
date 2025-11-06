@@ -484,6 +484,7 @@ VtolAttitudeControl::Run()
 			break;
 		}
 
+		// 根据不同的VTOL模式填充执行器输出
 		_vtol_type->fill_actuator_outputs();
 
 		// 输出控制：发布推力和扭矩设定点
@@ -511,16 +512,19 @@ VtolAttitudeControl::Run()
 		    && _vtol_vehicle_status.vehicle_vtol_state != vtol_vehicle_status_s::VEHICLE_VTOL_STATE_FW) {
 
 			// flaps
+			// 在悬停和过渡阶段不打襟翼（保持收起/中立）
 			normalized_unsigned_setpoint_s flaps_setpoint;
 			flaps_setpoint.normalized_setpoint = 0.f; // for now always set flaps to 0 in transitions and hover
 			flaps_setpoint.timestamp = hrt_absolute_time();
 			_flaps_setpoint_pub.publish(flaps_setpoint);
 
 			// spoilers
+			// 若满足“准备/执行下降/着陆”的条件，则按参数打扰流板
 			float spoiler_control = 0.f;
 
 			if ((_pos_sp_triplet.current.valid && _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_LAND) ||
 			    _vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_DESCEND) {
+				// 该参数通常是标准化量 ∈ [0, 1]，代表扰流板期望展开比例
 				spoiler_control = _param_vt_spoiler_mc_ld.get();
 			}
 

@@ -41,6 +41,10 @@
 
 using namespace matrix;
 
+/*
+VTOL 模式（vtol=true）时改为 ORB_ID(mc_virtual_attitude_setpoint)，
+这是专门给 VTOL 中间控制链路的“虚拟”话题。VTOL 控制器会同时订阅多旋翼和固定翼的虚拟姿态设定值，
+并根据当前模式在多旋翼/固定翼之间切换或混合，再把最终姿态指令发到真正的姿态控制器*/
 MulticopterPositionControl::MulticopterPositionControl(bool vtol) :
 	ModuleParams(nullptr),
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
