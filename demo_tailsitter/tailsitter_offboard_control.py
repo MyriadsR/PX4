@@ -63,7 +63,7 @@ async def run():
     # =============== 阶段2: 准备过渡 - 加速前飞 ===============
     print("\n[阶段2] 加速前飞，准备过渡到固定翼模式...")
     # 向前（北）移动50米，保持高度20米
-    await drone.offboard.set_position_ned(PositionNedYaw(50.0, 0.0, -20.0, 0.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 0.0, -20.0, 0.0))
     await asyncio.sleep(8)
 
     # =============== 阶段3: 切换到固定翼模式 ===============
@@ -100,17 +100,17 @@ async def run():
 
     # 航点1: 向前（北）飞到100米
     print("-- 飞向航点1 (北100米)")
-    await drone.offboard.set_position_ned(PositionNedYaw(100.0, 0.0, -25.0, 0.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(40.0, 0.0, -25.0, 0.0))
     await asyncio.sleep(8)
 
     # 航点2: 向右（东）转弯
     print("-- 飞向航点2 (东100米)")
-    await drone.offboard.set_position_ned(PositionNedYaw(100.0, 100.0, -25.0, 90.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(40.0, 100.0, -25.0, 90.0))
     await asyncio.sleep(10)
 
     # 航点3: 向后（南）飞
     print("-- 飞向航点3 (返回)")
-    await drone.offboard.set_position_ned(PositionNedYaw(50.0, 100.0, -25.0, 180.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 100.0, -25.0, 180.0))
     await asyncio.sleep(10)
 
     # 航点4: 返回起点附近

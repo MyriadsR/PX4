@@ -183,11 +183,12 @@ void Tailsitter::update_transition_state()
 		if (_vtol_mode == vtol_mode::TRANSITION_BACK) {
 			// calculate rotation axis for transition.
 			_q_trans_start = Quatf(_v_att->q);	// 获取当前姿态四元数
-			Vector3f z = -_q_trans_start.dcm_z();	// 获取当前z轴方向（指向下方）
+			Vector3f z = -_q_trans_start.dcm_z();	// 获取当前z轴方向（指向机体坐标系下方）
 			_trans_rot_axis = z.cross(Vector3f(0.f, 0.f, -1.f));	// 计算旋转轴（当前z轴与垂直向下方向的叉积）
 
 			// as heading setpoint we choose the heading given by the direction the vehicle points
 			// 选择航向设定点：使用飞行器当前指向的方向作为航向
+			// atan2f(y, x) 计算出 z 向量在水平面的投影方向（即飞行器机头指向的航向）
 			const float yaw_sp = atan2f(z(1), z(0));
 
 			// the intial attitude setpoint for a backtransition is a combination of the current fw pitch setpoint,
@@ -205,6 +206,9 @@ void Tailsitter::update_transition_state()
 			// attitude during transitions are controlled by mc attitude control so rotate the desired attitude to the
 			// multirotor frame
 			// 过渡期间的姿态由多旋翼姿态控制，因此将期望姿态旋转到多旋翼坐标系
+			// 尾座式飞行器在固定翼模式下，机体 x 轴朝前（飞行方向）
+			// 在多旋翼模式下，机体 z 轴朝下（推力方向）
+			// 两者相差 90° 俯仰旋转
 			_q_trans_start = _q_trans_start * Quatf(Eulerf(0, -M_PI_2_F, 0));
 
 		} else if (_vtol_mode == vtol_mode::TRANSITION_FRONT_P1) {
@@ -235,9 +239,13 @@ void Tailsitter::update_transition_state()
 	if (_vtol_mode == vtol_mode::TRANSITION_FRONT_P1) {
 
 		// calculate pitching rate - and constrain to at least 0.1s transition time
+		// _param_vt_f_trans_dur.get() 是用户设定的前向过渡时长（秒）
+		// 若参数设为 2.0 秒：trans_pitch_rate = π/2 / 2.0 = 0.785 弧度/秒 ≈ 45°/秒
 		const float trans_pitch_rate = M_PI_2_F / math::max(_param_vt_f_trans_dur.get(), 0.1f);
 
 		// 当倾斜角度小于阈值时，根据时间和旋转轴计算新的姿态设定点
+		// _time_since_trans_start：过渡开始后经过的时间（秒）乘以俯仰速率 → 得到累计旋转角度（弧度）
+		// 四元数乘法 q_delta * q_start 表示：在起始姿态基础上，叠加增量旋转
 		if (tilt < M_PI_2_F - math::radians(_param_fw_psp_off.get())) {
 			_q_trans_sp = Quatf(AxisAnglef(_trans_rot_axis,
 						       _time_since_trans_start * trans_pitch_rate)) * _q_trans_start;
