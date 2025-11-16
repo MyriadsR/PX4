@@ -296,6 +296,11 @@ void Tailsitter::update_fw_state()
 /**
 * Write data to actuator output topic.
 */
+/*	_torque_setpoint_0：多旋翼扭矩（通过差分推力实现）
+	_thrust_setpoint_0：多旋翼推力（电机总推力）
+	_torque_setpoint_1：固定翼扭矩（舵面控制）
+	_thrust_setpoint_1：固定翼推力（暂未使用，保留）
+*/
 void Tailsitter::fill_actuator_outputs()
 {
 	// 初始化扭矩设定点0（多旋翼控制）
@@ -327,8 +332,10 @@ void Tailsitter::fill_actuator_outputs()
 	_thrust_setpoint_1->xyz[2] = 0.f;
 
 	// Motors
+	// 只设置期望扭矩和推力，具体怎么实现由混控器根据机型决定
 	if (_vtol_mode == vtol_mode::FW_MODE) {
 		// 将固定翼的前向推力转换为多旋翼z轴相反方向推力
+		// 固定翼飞行时，电机提供前向推进力
 		_thrust_setpoint_0->xyz[2] = -_vehicle_thrust_setpoint_virtual_fw->xyz[0];
 
 		/* allow differential thrust if enabled */
@@ -375,6 +382,7 @@ void Tailsitter::fill_actuator_outputs()
 	}
 
 	// Control surfaces
+	// 舵面控制（通道 1）
 	if (!_param_vt_elev_mc_lock.get() || _vtol_mode != vtol_mode::MC_MODE) {
 		_torque_setpoint_1->xyz[0] = _vehicle_torque_setpoint_virtual_fw->xyz[0];
 		_torque_setpoint_1->xyz[1] = _vehicle_torque_setpoint_virtual_fw->xyz[1];
