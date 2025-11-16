@@ -396,6 +396,7 @@ void MulticopterPositionControl::Run()
 	vehicle_local_position_s vehicle_local_position;
 
 	if (_local_pos_sub.update(&vehicle_local_position)) {
+		// 最小 2ms（最大 500 Hz），最大 40ms（最小 25 Hz）
 		const float dt =
 			math::constrain(((vehicle_local_position.timestamp_sample - _time_stamp_last_loop) * 1e-6f), 0.002f, 0.04f);
 		_time_stamp_last_loop = vehicle_local_position.timestamp_sample;

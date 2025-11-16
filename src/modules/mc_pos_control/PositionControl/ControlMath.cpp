@@ -67,26 +67,39 @@ void limitTilt(Vector3f &body_unit, const Vector3f &world_unit, const float max_
 	body_unit = cosf(angle) * world_unit + sinf(angle) * rejection.unit();
 }
 
+// 已知机体 Z 轴方向（推力方向）
+// 已知期望偏航角
+// 构造正交的机体 X、Y 轴
+// 组成旋转矩阵 → 转换为四元数
 void bodyzToAttitude(Vector3f body_z, const float yaw_sp, vehicle_attitude_setpoint_s &att_sp)
 {
 	// zero vector, no direction, set safe level value
 	if (body_z.norm_squared() < FLT_EPSILON) {
-		body_z(2) = 1.f;
+		body_z(2) = 1.f;	// 设为垂直向下（NED坐标系）
 	}
 
-	body_z.normalize();
+	body_z.normalize();		// 归一化为单位向量，只保留方向信息
 
 	// vector of desired yaw direction in XY plane, rotated by PI/2
+	// 计算机体 Y 轴在水平面上的参考方向
 	const Vector3f y_C{-sinf(yaw_sp), cosf(yaw_sp), 0.f};
 
 	// desired body_x axis, orthogonal to body_z
 	Vector3f body_x = y_C % body_z;
 
 	// keep nose to front while inverted upside down
+	// 机体 Z 轴向上（倒飞/背飞），为了保持机头朝前，需要反转 X 轴方向
 	if (body_z(2) < 0.f) {
 		body_x = -body_x;
 	}
 
+	// 当推力完全水平时（body_z = [x, y, 0]）
+	/*
+	机体倾斜 90°
+	叉乘会失效（y_C 和 body_z 可能平行）
+	强制设置 body_x = [0, 0, 1]（指向下）
+	这种情况下偏航控制失效（机体侧翻）
+	设置一个安全的 X 轴方向避免矩阵奇异*/
 	if (fabsf(body_z(2)) < 0.000001f) {
 		// desired thrust is in XY plane, set X downside to construct correct matrix,
 		// but yaw component will not be used actually
@@ -102,6 +115,8 @@ void bodyzToAttitude(Vector3f body_z, const float yaw_sp, vehicle_attitude_setpo
 	Dcmf R_sp;
 
 	// fill rotation matrix
+	// 每一列是机体坐标系在 NED 坐标系中的表示
+	// 这个矩阵描述了从 NED 到机体的旋转
 	for (int i = 0; i < 3; i++) {
 		R_sp(i, 0) = body_x(i);
 		R_sp(i, 1) = body_y(i);
