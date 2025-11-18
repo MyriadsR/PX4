@@ -164,6 +164,7 @@ MulticopterAttitudeControl::generate_attitude_setpoint(const Quatf &q, float dt)
 	_man_pitch_input_filter.setParameters(dt, _param_mc_man_tilt_tau.get());
 
 	// we want to fly towards the direction of (roll, pitch)
+	// 计算期望倾斜向量
 	Vector2f v = Vector2f(_man_roll_input_filter.update(_manual_control_setpoint.roll * _man_tilt_max),
 			      -_man_pitch_input_filter.update(_manual_control_setpoint.pitch * _man_tilt_max));
 	float v_norm = v.norm(); // the norm of v defines the tilt angle
@@ -179,6 +180,7 @@ MulticopterAttitudeControl::generate_attitude_setpoint(const Quatf &q, float dt)
 	// This is the formula by how much the yaw changes:
 	//   let a := tilt angle, b := atan(y/x) (direction of maximum tilt)
 	//   yaw = atan(-2 * sin(b) * cos(b) * sin^2(a/2) / (1 - 2 * cos^2(b) * sin^2(a/2))).
+	// 构造偏航四元数
 	const Quatf q_sp_yaw(cosf(yaw_setpoint / 2.f), 0.f, 0.f, sinf(yaw_setpoint / 2.f));
 
 	if (_vtol) {
@@ -191,6 +193,7 @@ MulticopterAttitudeControl::generate_attitude_setpoint(const Quatf &q, float dt)
 	}
 
 	// Align the desired tilt with the yaw setpoint
+	// 组合最终期望姿态
 	Quatf q_sp = q_sp_yaw * q_sp_rp;
 
 	q_sp.copyTo(attitude_setpoint.q_d);
@@ -339,6 +342,7 @@ MulticopterAttitudeControl::Run()
 				_quat_reset_counter = v_att.quat_reset_counter;
 			}
 
+			// 调用之前的姿态控制器
 			Vector3f rates_sp = _attitude_control.update(q);
 
 			const hrt_abstime now = hrt_absolute_time();

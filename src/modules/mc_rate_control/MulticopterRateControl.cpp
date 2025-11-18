@@ -95,7 +95,8 @@ MulticopterRateControl::parameters_updated()
 	// manual rate control acro mode rate limits
 	_acro_rate_max = Vector3f(radians(_param_mc_acro_r_max.get()), radians(_param_mc_acro_p_max.get()),
 				  radians(_param_mc_acro_y_max.get()));
-
+	
+	// 偏航力矩低通滤波器
 	_output_lpf_yaw.setCutoffFreq(_param_mc_yaw_tq_cutoff.get());
 }
 
@@ -123,16 +124,18 @@ MulticopterRateControl::Run()
 	/* run controller on gyro changes */
 	vehicle_angular_velocity_s angular_velocity;
 
+	// 订阅角速度数据
 	if (_vehicle_angular_velocity_sub.update(&angular_velocity)) {
 
 		const hrt_abstime now = angular_velocity.timestamp_sample;
 
 		// Guard against too small (< 0.125ms) and too large (> 20ms) dt's.
+		// 计算时间步长，限制在0.125ms到20ms之间
 		const float dt = math::constrain(((now - _last_run) * 1e-6f), 0.000125f, 0.02f);
 		_last_run = now;
 
-		const Vector3f rates{angular_velocity.xyz};
-		const Vector3f angular_accel{angular_velocity.xyz_derivative};
+		const Vector3f rates{angular_velocity.xyz};		// 当前角速度
+		const Vector3f angular_accel{angular_velocity.xyz_derivative};	// 当前角加速度
 
 		/* check for updates in other topics */
 		_vehicle_control_mode_sub.update(&_vehicle_control_mode);
@@ -157,6 +160,7 @@ MulticopterRateControl::Run()
 
 			if (_manual_control_setpoint_sub.update(&manual_control_setpoint)) {
 				// manual rates control - ACRO mode
+				// 该模式下，摇杆直接控制角速度，不控制姿态，且应用了超调函数进行非线性映射
 				const Vector3f man_rate_sp{
 					math::superexpo(manual_control_setpoint.roll, _param_mc_acro_expo.get(), _param_mc_acro_supexpo.get()),
 					math::superexpo(-manual_control_setpoint.pitch, _param_mc_acro_expo.get(), _param_mc_acro_supexpo.get()),
@@ -178,6 +182,7 @@ MulticopterRateControl::Run()
 
 		} else if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
 			if (_vehicle_rates_setpoint_sub.copy(&vehicle_rates_setpoint)) {
+				// 使用来自姿态控制器的角速度设定值
 				_rates_setpoint(0) = PX4_ISFINITE(vehicle_rates_setpoint.roll)  ? vehicle_rates_setpoint.roll  : rates(0);
 				_rates_setpoint(1) = PX4_ISFINITE(vehicle_rates_setpoint.pitch) ? vehicle_rates_setpoint.pitch : rates(1);
 				_rates_setpoint(2) = PX4_ISFINITE(vehicle_rates_setpoint.yaw)   ? vehicle_rates_setpoint.yaw   : rates(2);
@@ -196,6 +201,11 @@ MulticopterRateControl::Run()
 			// update saturation status from control allocation feedback
 			control_allocator_status_s control_allocator_status;
 
+			// 处理控制分配反馈（抗饱和）
+			/*
+			问题：当电机饱和时，PID积分项会继续累积（积分饱和）
+			解决：检测控制分配器的未分配力矩，判断是否饱和
+			效果：饱和方向停止积分，避免过度积分导致的超调 */
 			if (_control_allocator_status_sub.update(&control_allocator_status)) {
 				Vector<bool, 3> saturation_positive;
 				Vector<bool, 3> saturation_negative;
@@ -220,6 +230,10 @@ MulticopterRateControl::Run()
 				_rate_control.update(rates, _rates_setpoint, angular_accel, dt, _maybe_landed || _landed);
 
 			// apply low-pass filtering on yaw axis to reduce high frequency torque caused by rotor acceleration
+			// 对偏航力矩应用低通滤波
+			/*
+			偏航轴转动惯量大，高频力矩会导致电机转速快速变化
+			低通滤波减少高频分量，保护电机 */
 			torque_setpoint(2) = _output_lpf_yaw.update(torque_setpoint(2), dt);
 
 			// publish rate controller status
@@ -232,6 +246,8 @@ MulticopterRateControl::Run()
 			vehicle_thrust_setpoint_s vehicle_thrust_setpoint{};
 			vehicle_torque_setpoint_s vehicle_torque_setpoint{};
 
+			// 力矩：[Mx, My, Mz]，分别对应横滚、俯仰、偏航力矩
+			// 推力：[Fx, Fy, Fz]，通常只有Fz非零（垂直推力）
 			_thrust_setpoint.copyTo(vehicle_thrust_setpoint.xyz);
 			vehicle_torque_setpoint.xyz[0] = PX4_ISFINITE(torque_setpoint(0)) ? torque_setpoint(0) : 0.f;
 			vehicle_torque_setpoint.xyz[1] = PX4_ISFINITE(torque_setpoint(1)) ? torque_setpoint(1) : 0.f;
@@ -271,9 +287,11 @@ MulticopterRateControl::Run()
 	perf_end(_loop_perf);
 }
 
+// 控制能量统计
 void MulticopterRateControl::updateActuatorControlsStatus(const vehicle_torque_setpoint_s &vehicle_torque_setpoint,
 		float dt)
 {
+	// 累积控制能量（力矩的平方）
 	for (int i = 0; i < 3; i++) {
 		_control_energy[i] += vehicle_torque_setpoint.xyz[i] * vehicle_torque_setpoint.xyz[i] * dt;
 	}

@@ -47,6 +47,7 @@ void AttitudeControl::setProportionalGain(const matrix::Vector3f &proportional_g
 	_yaw_w = math::constrain(yaw_weight, 0.f, 1.f);
 
 	// compensate for the effect of the yaw weight rescaling the output
+	// 补偿偏航权重缩放对输出的影响
 	if (_yaw_w > 1e-4f) {
 		_proportional_gain(2) /= _yaw_w;
 	}
@@ -54,53 +55,70 @@ void AttitudeControl::setProportionalGain(const matrix::Vector3f &proportional_g
 
 matrix::Vector3f AttitudeControl::update(const Quatf &q) const
 {
-	Quatf qd = _attitude_setpoint_q;
+	Quatf qd = _attitude_setpoint_q;	// 期望姿态四元数
 
 	// calculate reduced desired attitude neglecting vehicle's yaw to prioritize roll and pitch
-	const Vector3f e_z = q.dcm_z();
-	const Vector3f e_z_d = qd.dcm_z();
+	const Vector3f e_z = q.dcm_z();		// 当前姿态的Z轴（机体坐标系）
+	const Vector3f e_z_d = qd.dcm_z();	// 期望姿态的Z轴（机体坐标系）
+
+	// 计算从当前Z轴到期望Z轴的旋转（忽略偏航）
 	Quatf qd_red(e_z, e_z_d);
 
 	if (fabsf(qd_red(1)) > (1.f - 1e-5f) || fabsf(qd_red(2)) > (1.f - 1e-5f)) {
 		// In the infinitesimal corner case where the vehicle and thrust have the completely opposite direction,
 		// full attitude control anyways generates no yaw input and directly takes the combination of
 		// roll and pitch leading to the correct desired yaw. Ignoring this case would still be totally safe and stable.
+		// 特殊情况处理：当飞行器倒置时（推力方向相反180度），四元数可能出现数值问题，直接使用完整期望姿态
 		qd_red = qd;
 
 	} else {
 		// Transform rotation from current to desired thrust vector into a world frame reduced desired attitude.
 		// This is a right multiplication as the tilt error quaternion is obtained from two Z vectors expressed in the world frame.
+		// 将旋转姿态转换到世界坐标系
 		qd_red *= q;
 	}
 
 	// With a full desired attitude given by: qd = qd_red * qd_dyaw, extract the delta yaw component.
 	// By definition, the delta yaw quaternion has the form (cos(angle/2), 0, 0, sin(angle/2))
+	// 提取偏航差值: qd = qd_red * qd_dyaw
 	Quatf qd_dyaw = qd_red.inversed() * qd;
-	qd_dyaw.canonicalize();
+	qd_dyaw.canonicalize();		// 标准化（确保实部为正）
 	// catch numerical problems with the domain of acosf and asinf
+	// 限制反三角函数的定义域
 	qd_dyaw(0) = math::constrain(qd_dyaw(0), -1.f, 1.f);
 	qd_dyaw(3) = math::constrain(qd_dyaw(3), -1.f, 1.f);
 
 	// scale the delta yaw angle and re-combine the desired attitude
+	// 缩放偏航角度并重新组合，降低偏航响应速度
 	qd = qd_red * Quatf(cosf(_yaw_w * acosf(qd_dyaw(0))), 0.f, 0.f, sinf(_yaw_w * asinf(qd_dyaw(3))));
 
 	// quaternion attitude control law, qe is rotation from q to qd
+	// 从当前姿态q到期望姿态qd的旋转误差
 	const Quatf qe = q.inversed() * qd;
 
 	// using sin(alpha/2) scaled rotation axis as attitude error (see quaternion definition by axis angle)
 	// also taking care of the antipodal unit quaternion ambiguity
+	// 将四元数误差转换为旋转轴表示（姿态误差向量）
+	// 四元数：q = [w, x, y, z] = [cos(θ/2), sin(θ/2)·axis]
+	// 小角度近似：误差 ≈ 2 * [x, y, z]
 	const Vector3f eq = 2.f * qe.canonical().imag();
 
 	// calculate angular rates setpoint
+	// P控制器：角速度 = 比例增益 × 姿态误差
 	Vector3f rate_setpoint = eq.emult(_proportional_gain);
 
 	// Feed forward the yaw setpoint rate.
+	// 前馈偏航角速度
 	// yawspeed_setpoint is the feed forward commanded rotation around the world z-axis,
 	// but we need to apply it in the body frame (because _rates_sp is expressed in the body frame).
 	// Therefore we infer the world z-axis (expressed in the body frame) by taking the last column of R.transposed (== q.inversed)
 	// and multiply it by the yaw setpoint rate (yawspeed_setpoint).
 	// This yields a vector representing the commanded rotatation around the world z-axis expressed in the body frame
 	// such that it can be added to the rates setpoint.
+	/*
+	_yawspeed_setpoint 是绕世界Z轴的期望角速度
+	q.inversed().dcm_z() 提取机体坐标系中的世界Z轴方向
+	将世界坐标系的偏航速度投影到机体坐标系*/
 	if (std::isfinite(_yawspeed_setpoint)) {
 		rate_setpoint += q.inversed().dcm_z() * _yawspeed_setpoint;
 	}
