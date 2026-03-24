@@ -107,11 +107,12 @@ ControlAllocator::parameters_updated()
 {
 	_has_slew_rate = false;
 
+	// 为每个电机加载转速变化率限制参数
 	for (int i = 0; i < MAX_NUM_MOTORS; ++i) {
 		param_get(_param_handles.slew_rate_motors[i], &_params.slew_rate_motors[i]);
 		_has_slew_rate |= _params.slew_rate_motors[i] > FLT_EPSILON;
 	}
-
+	// 为每个舵机加载转速变化率限制参数
 	for (int i = 0; i < MAX_NUM_SERVOS; ++i) {
 		param_get(_param_handles.slew_rate_servos[i], &_params.slew_rate_servos[i]);
 		_has_slew_rate |= _params.slew_rate_servos[i] > FLT_EPSILON;
@@ -160,6 +161,7 @@ ControlAllocator::update_allocation_method(bool force)
 
 		_num_control_allocation = _actuator_effectiveness->numMatrices();
 
+		// 获取推荐的分配方法
 		AllocationMethod desired_methods[ActuatorEffectiveness::MAX_NUM_MATRICES];
 		_actuator_effectiveness->getDesiredAllocationMethod(desired_methods);
 
@@ -382,6 +384,7 @@ ControlAllocator::Run()
 	vehicle_thrust_setpoint_s vehicle_thrust_setpoint;
 
 	// Run allocator on torque changes
+	// 收到力矩设定值时触发
 	if (_vehicle_torque_setpoint_sub.update(&vehicle_torque_setpoint)) {
 		_torque_sp = matrix::Vector3f(vehicle_torque_setpoint.xyz);
 
@@ -402,14 +405,16 @@ ControlAllocator::Run()
 		update_effectiveness_matrix_if_needed(EffectivenessUpdateReason::NO_EXTERNAL_UPDATE);
 
 		// Set control setpoint vector(s)
+		// 构造6维控制向量
 		matrix::Vector<float, NUM_AXES> c[ActuatorEffectiveness::MAX_NUM_MATRICES];
-		c[0](0) = _torque_sp(0);
-		c[0](1) = _torque_sp(1);
-		c[0](2) = _torque_sp(2);
-		c[0](3) = _thrust_sp(0);
-		c[0](4) = _thrust_sp(1);
-		c[0](5) = _thrust_sp(2);
-
+		c[0](0) = _torque_sp(0);	// Roll torque
+		c[0](1) = _torque_sp(1);	// Pitch torque
+		c[0](2) = _torque_sp(2);	// Yaw torque
+		c[0](3) = _thrust_sp(0);	// X thrust
+		c[0](4) = _thrust_sp(1);	// Y thrust
+		c[0](5) = _thrust_sp(2);	// Z thrust
+		
+		// VTOL可能有第二组控制
 		if (_num_control_allocation > 1) {
 			if (_vehicle_torque_setpoint1_sub.copy(&vehicle_torque_setpoint)) {
 				c[1](0) = vehicle_torque_setpoint.xyz[0];
@@ -499,6 +504,7 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReaso
 				int selected_matrix = _control_allocation_selection_indexes[actuator_idx];
 
 				if ((ActuatorType)actuator_type == ActuatorType::MOTORS) {
+					// 电机限位设置
 					if (actuator_type_idx >= MAX_NUM_MOTORS) {
 						PX4_ERR("Too many motors");
 						_num_actuators[actuator_type] = 0;
@@ -506,12 +512,14 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReaso
 					}
 
 					if (_param_r_rev.get() & (1u << actuator_type_idx)) {
+						// 可反转电机（如某些特技四旋翼）
 						minimum[selected_matrix](actuator_idx_matrix[selected_matrix]) = -1.f;
 
 					} else {
+						// 标准单向电机
 						minimum[selected_matrix](actuator_idx_matrix[selected_matrix]) = 0.f;
 					}
-
+					// 设置转速变化率限制
 					slew_rate[selected_matrix](actuator_idx_matrix[selected_matrix]) = _params.slew_rate_motors[actuator_type_idx];
 
 				} else if ((ActuatorType)actuator_type == ActuatorType::SERVOS) {
@@ -520,7 +528,7 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReaso
 						_num_actuators[actuator_type] = 0;
 						break;
 					}
-
+					// 舵机可以双向
 					minimum[selected_matrix](actuator_idx_matrix[selected_matrix]) = -1.f;
 					slew_rate[selected_matrix](actuator_idx_matrix[selected_matrix]) = _params.slew_rate_servos[actuator_type_idx];
 					trims.trim[actuator_type_idx] = config.trim[selected_matrix](actuator_idx_matrix[selected_matrix]);
