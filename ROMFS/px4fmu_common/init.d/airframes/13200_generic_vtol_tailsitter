@@ -10,25 +10,42 @@
 # @board holybro_kakutef7 exclude
 #
 
+# 注意：这个 airframe 里分配器的参数设置是“静态”的，和飞行状态无关。
+# 1. 舵面在分配器里通常只用“力矩缩放系数”  
+# 舵面常用的是 roll/pitch/yaw 的缩放（比如 TRQ_P、TRQ_Y），而不是完整的气动导数（随空速、迎角、舵效变化的那套）。  
+# 所以它不知道“现在空速低，舵效差”，只知道“这个舵面对 pitch/yaw 的标称权重是多少”。
+
+# 2. 真实力矩是随飞行状态变的，但分配矩阵通常不随状态实时重建  
+# 真实世界里舵面力矩近似和动压相关：  
+# $$
+# q = \frac{1}{2}\rho V^2
+# $$  
+# 同样舵偏在不同 $V$ 下力矩差很多。  
+# 但分配器这层一般不直接用这个实时变化，所以会出现“同样舵偏，实际力矩不同”。
+
+# 3. 闭环控制会“补偿”这件事  
+# 虽然分配器是静态映射，但外环/姿态角速率闭环会看到误差，继续加大或减小期望力矩，最终把舵偏推到新的值。  
+# 也就是说：动态适配主要靠控制器反馈，不是靠分配器内部气动建模。
+
 . ${R}etc/init.d/rc.vtol_defaults
 
 param set-default EKF2_FUSE_BETA 0 # side slip fusion is currently not supported for tailsitters
 
 param set-default CA_AIRFRAME 4
 param set-default CA_ROTOR_COUNT 2
-param set-default CA_ROTOR0_KM -0.05
-param set-default CA_ROTOR0_PY -0.2
+param set-default CA_ROTOR0_KM -0.05    # 表示旋向对应的反扭矩符号相反
+param set-default CA_ROTOR0_PY -0.2     # 表示两个电机在机体 y 轴左右对称布置
 param set-default CA_ROTOR1_KM 0.05
 param set-default CA_ROTOR1_PY 0.2
-param set-default CA_SV_CS_COUNT 2
-param set-default CA_SV_CS0_TRQ_P 0.5
-param set-default CA_SV_CS0_TRQ_Y 0.5
-param set-default CA_SV_CS0_TYPE 5
-param set-default CA_SV_CS1_TRQ_P 0.5
-param set-default CA_SV_CS1_TRQ_Y -0.5
-param set-default CA_SV_CS1_TYPE 6
+param set-default CA_SV_CS_COUNT 2      # 两个舵面
+param set-default CA_SV_CS0_TRQ_P 0.5   # 表示俯仰同向贡献
+param set-default CA_SV_CS0_TRQ_Y 0.5   # 表示偏航反向贡献（因为是左舵面，右偏产生的力矩是负的）
+param set-default CA_SV_CS0_TYPE 5      # left elevon
+param set-default CA_SV_CS1_TRQ_P 0.5   # 表示俯仰同向贡献
+param set-default CA_SV_CS1_TRQ_Y -0.5  # 表示偏航反向贡献（因为是右舵面，右偏产生的力矩是正的）
+param set-default CA_SV_CS1_TYPE 6      # right elevon
 
 param set-default MAV_TYPE 19
 param set-default VT_TYPE 0
-param set-default VT_ELEV_MC_LOCK 0
+param set-default VT_ELEV_MC_LOCK 0     # 悬停模式下舵面不锁死，允许微调以补偿风等扰动
 param set-default VT_B_TRANS_DUR 5
