@@ -8,9 +8,55 @@ Tailsitter VTOL Offboard Control Script
 """
 
 import asyncio
+import math
 import sys
 from mavsdk import System
 from mavsdk.offboard import (OffboardError, PositionNedYaw, VelocityNedYaw)
+
+
+async def wait_until_reached_ned(
+    drone,
+    target_n,
+    target_e,
+    target_d,
+    timeout_s=60.0,
+    tolerance_m=6.0,
+    stable_hits_required=3,
+):
+    """等待无人机到达指定NED目标点（带超时）。"""
+    start_time = asyncio.get_event_loop().time()
+    last_print_time = 0.0
+    stable_hits = 0
+
+    async for pv_ned in drone.telemetry.position_velocity_ned():
+        pos = pv_ned.position
+        dn = target_n - pos.north_m
+        de = target_e - pos.east_m
+        dd = target_d - pos.down_m
+        distance = math.sqrt(dn * dn + de * de + dd * dd)
+
+        now = asyncio.get_event_loop().time()
+        if now - last_print_time >= 0.2:
+            print(
+                f"[到点检测] 当前NED=({pos.north_m:.1f}, {pos.east_m:.1f}, {pos.down_m:.1f}) "
+                f"目标=({target_n:.1f}, {target_e:.1f}, {target_d:.1f}) 距离={distance:.1f}m"
+            )
+            last_print_time = now
+
+        if distance <= tolerance_m:
+            stable_hits += 1
+            if stable_hits >= stable_hits_required:
+                print(
+                    f"-- 已到达目标点 (误差 {distance:.1f}m <= {tolerance_m:.1f}m, "
+                    f"连续命中 {stable_hits_required} 次)"
+                )
+                return True
+        else:
+            stable_hits = 0
+
+        if now - start_time > timeout_s:
+            print(f"-- 到点等待超时 ({timeout_s:.0f}s)，继续下一阶段")
+            return False
 
 
 async def run():
@@ -32,6 +78,13 @@ async def run():
         if health.is_global_position_ok and health.is_home_position_ok:
             print("-- 位置估计就绪")
             break
+
+    # 提高本地NED位置流频率，减少与Gazebo显示的时间差
+    try:
+        await drone.telemetry.set_rate_position_velocity_ned(30.0)
+        print("-- 已设置NED位置更新频率: 30Hz")
+    except Exception as e:
+        print(f"-- 设置NED位置更新频率失败，使用默认频率: {e}")
 
     # 设置初始位置设定点（NED坐标系：North, East, Down）
     print("\n设置初始Offboard模式...")
@@ -56,15 +109,15 @@ async def run():
     print("\n[阶段1] 垂直起飞到20米...")
     await drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, -20.0, 0.0))
 
-    # 等待到达目标高度
-    await asyncio.sleep(10)
+    # 等待到达目标点
+    await wait_until_reached_ned(drone, 0.0, 0.0, -20.0, timeout_s=35.0, tolerance_m=2.0)
     print("-- 到达起飞高度")
 
     # =============== 阶段2: 准备过渡 - 加速前飞 ===============
     print("\n[阶段2] 加速前飞，准备过渡到固定翼模式...")
     # 向前（北）移动50米，保持高度20米
-    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 0.0, -20.0, 0.0))
-    await asyncio.sleep(8)
+    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 0.0, -30.0, 0.0))
+    await wait_until_reached_ned(drone, 20.0, 0.0, -30.0, timeout_s=30.0, tolerance_m=4.0)
 
     # =============== 阶段3: 切换到固定翼模式 ===============
     print("\n[阶段3] 请求切换到固定翼模式...")
@@ -100,23 +153,23 @@ async def run():
 
     # 航点1: 向前（北）飞到100米
     print("-- 飞向航点1 (北100米)")
-    await drone.offboard.set_position_ned(PositionNedYaw(40.0, 0.0, -25.0, 0.0))
-    await asyncio.sleep(8)
+    await drone.offboard.set_position_ned(PositionNedYaw(300.0, 0.0, -35.0, 0.0))
+    await wait_until_reached_ned(drone, 300.0, 0.0, -35.0, timeout_s=80.0, tolerance_m=10.0)
 
     # 航点2: 向右（东）转弯
     print("-- 飞向航点2 (东100米)")
-    await drone.offboard.set_position_ned(PositionNedYaw(40.0, 100.0, -25.0, 90.0))
-    await asyncio.sleep(10)
+    await drone.offboard.set_position_ned(PositionNedYaw(300.0, 300.0, -35.0, 90.0))
+    await wait_until_reached_ned(drone, 300.0, 300.0, -35.0, timeout_s=80.0, tolerance_m=10.0)
 
     # 航点3: 向后（南）飞
     print("-- 飞向航点3 (返回)")
-    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 100.0, -25.0, 180.0))
-    await asyncio.sleep(10)
+    await drone.offboard.set_position_ned(PositionNedYaw(0.0, 300.0, -30.0, 180.0))
+    await wait_until_reached_ned(drone, 0.0, 300.0, -30.0, timeout_s=80.0, tolerance_m=10.0)
 
     # 航点4: 返回起点附近
     print("-- 飞向航点4 (接近home)")
-    await drone.offboard.set_position_ned(PositionNedYaw(20.0, 50.0, -22.0, 270.0))
-    await asyncio.sleep(10)
+    await drone.offboard.set_position_ned(PositionNedYaw(0.0, 50.0, -35.0, 270.0))
+    await wait_until_reached_ned(drone, 0.0, 50.0, -35.0, timeout_s=80.0, tolerance_m=10.0)
 
     # =============== 阶段5: 反向过渡回多旋翼模式 ===============
     print("\n[阶段5] 请求切换回多旋翼模式...")
@@ -147,8 +200,8 @@ async def run():
 
     # =============== 阶段6: 返回home点上方 ===============
     print("\n[阶段6] 返回home点上方...")
-    await drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, -15.0, 0.0))
-    await asyncio.sleep(10)
+    await drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, -20.0, 270.0))
+    await wait_until_reached_ned(drone, 0.0, 0.0, -20.0, timeout_s=45.0, tolerance_m=2.0)
     print("-- 已到达home点上方")
 
     # =============== 阶段7: 停止Offboard并降落 ===============
